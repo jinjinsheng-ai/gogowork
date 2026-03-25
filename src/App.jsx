@@ -3,6 +3,9 @@ import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { 
   getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection, 
   doc, 
   setDoc, 
@@ -82,7 +85,8 @@ import {
   Target,
   Eye,
   EyeOff,
-  CopyPlus
+  CopyPlus,
+  WifiOff
 } from 'lucide-react';
 
 const getFirebaseConfig = () => {
@@ -164,24 +168,30 @@ let firebaseConfig = {
   storageBucket: "gogo-work.firebasestorage.app",
   messagingSenderId: "75393634589",
   appId: "1:75393634589:web:f937c2a3d83532751d91f4"
-}
+};
 let app, auth, db;
 try {
     // 加上 getApps 判斷，避免重複初始化導致報錯並誤刪使用者的 Config
     if (getApps().length === 0) {
         app = initializeApp(firebaseConfig);
+        // 啟用 Firestore 離線持久化快取 (支援多分頁離線同步)
+        db = initializeFirestore(app, {
+            localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+        });
     } else {
         app = getApp();
+        db = getFirestore(app);
     }
     auth = getAuth(app);
-    db = getFirestore(app);
 } catch (error) {
     console.error("Global Firebase init error:", error);
     // 移除舊版「清空 localStorage」的行為，避免僅僅因為連線稍慢就把設定全洗掉
     firebaseConfig = { apiKey: "dummy-api-key" };
     app = initializeApp(firebaseConfig, `fallback-${Date.now()}`);
     auth = getAuth(app);
-    db = getFirestore(app);
+    db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    });
 }
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -378,7 +388,7 @@ const Label = ({ children, required, className = "" }) => (<label className={`bl
 const Input = ({ type = "text", value, ...props }) => (<input type={type} className="w-full rounded-2xl border-slate-200/80 shadow-sm bg-slate-50/50 hover:bg-slate-100/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 sm:text-sm border p-3.5 transition-all duration-200 outline-none placeholder:text-slate-400" value={value || ''} {...props} />);
 const Select = ({ options = [], value, ...props }) => (<select className="w-full rounded-2xl border-slate-200/80 shadow-sm bg-slate-50/50 hover:bg-slate-100/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 sm:text-sm border p-3.5 transition-all duration-200 outline-none appearance-none" value={value || ''} {...props}><option value="">請選擇...</option>{options.map(opt => (<option key={opt} value={opt}>{opt}</option>))}</select>);
 const DatalistInput = ({ options = [], value, listId, ...props }) => (<><input list={listId} className="w-full rounded-2xl border-slate-200/80 shadow-sm bg-slate-50/50 hover:bg-slate-100/50 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 sm:text-sm border p-3.5 transition-all duration-200 outline-none placeholder:text-slate-400" value={value || ''} {...props} /><datalist id={listId}>{options.map(opt => (<option key={opt} value={opt} />))}</datalist></>);
-const SectionTitle = ({ title, icon: Icon, className = "mt-8" }) => (<div className={`flex items-center gap-3 mb-6 pb-3 border-b border-slate-100 text-slate-800 font-bold text-lg tracking-wide ${className}`}>{Icon && <div className="p-2 bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl text-slate-600 shadow-inner"><Icon size={20} /></div>}<h3>{title}</h3></div>);
+const SectionTitle = ({ title, icon: Icon, className = "mt-8", iconColor = "text-blue-600" }) => (<div className={`flex items-center gap-2 mb-6 pb-3 border-b border-slate-100 text-slate-800 font-bold text-lg tracking-wide ${className}`}>{Icon && <Icon size={24} className={iconColor} strokeWidth={2.5} />}<h3>{title}</h3></div>);
 const PhotoUpload = ({ label, value, onChange, disabled = false }) => { const fileInputRef = useRef(null); const [isCompressing, setIsCompressing] = useState(false); const { confirm, ConfirmDialog } = useConfirm(); const handleFileChange = async (e) => { const file = e.target.files[0]; if (file) { setIsCompressing(true); try { const compressedBase64 = await compressImage(file); onChange(compressedBase64); } catch (error) { console.error("Compression failed", error); alert("照片處理失敗，請重試"); } finally { setIsCompressing(false); } } }; const handleRemove = () => { confirm({ title: "移除照片", message: "確定要移除這張照片嗎？", onConfirm: () => { onChange(''); if (fileInputRef.current) fileInputRef.current.value = ''; } }); }; return (<div className="w-full"><ConfirmDialog /><Label>{label}</Label><div className={`border-2 border-dashed rounded-2xl h-48 flex items-center justify-center bg-slate-50 relative overflow-hidden transition ${value ? 'border-emerald-400' : 'border-slate-200 hover:border-blue-400'}`}>{isCompressing && (<div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10"><span className="text-blue-600 font-medium animate-pulse">處理中...</span></div>)}{value ? (<div className="relative w-full h-full group"><img src={value} alt="Preview" className="w-full h-full object-contain p-2" />{!disabled && (<button type="button" onClick={handleRemove} className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full shadow-lg hover:bg-red-600 transition z-20"><X size={16} /></button>)}</div>) : (<div className={`flex flex-col items-center justify-center text-slate-400 gap-3 cursor-pointer w-full h-full ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => !disabled && fileInputRef.current.click()}><div className="p-3 bg-white rounded-full shadow-sm"><Camera size={28} className="text-slate-300" /></div><span className="text-sm font-medium">點擊拍攝或上傳</span><span className="text-xs text-slate-400">(系統將自動壓縮)</span></div>)}<input type="file" ref={fileInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileChange} disabled={disabled} /></div></div>); };
 
 const MultiPhotoUpload = ({ label, images = [], onChange, disabled = false }) => {
@@ -979,7 +989,7 @@ const SettingsPanel = ({ customers, setCustomers, stations, setStations, equipme
             <div className="flex space-x-1 bg-slate-200/50 p-1.5 rounded-xl w-fit flex-wrap"><button onClick={() => setActiveSettingTab('customer')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeSettingTab === 'customer' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}>客戶資料管理</button><button onClick={() => setActiveSettingTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeSettingTab === 'lists' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}>選單項目管理</button><button onClick={() => setActiveSettingTab('permissions')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeSettingTab === 'permissions' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}>權限與模組</button><button onClick={() => setActiveSettingTab('system')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeSettingTab === 'system' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}>系統資料備份</button></div>
             {activeSettingTab === 'customer' && (<Card className="p-6">
                 <div className="flex justify-between items-center border-b border-slate-100 mb-6 pb-3">
-                    <div className="flex items-center gap-3 text-slate-800 font-bold text-lg tracking-wide"><div className="p-2 bg-gradient-to-br from-slate-100 to-slate-200 rounded-xl text-slate-600 shadow-inner"><User size={20} /></div><h3>客戶資料管理</h3></div>
+                    <div className="flex items-center gap-2 text-slate-800 font-bold text-lg tracking-wide"><User size={24} className="text-blue-600" strokeWidth={2.5} /><h3>客戶資料管理</h3></div>
                     <div className="flex gap-2">
                         <button onClick={handleExportCustomerCSV} className="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-50 flex items-center gap-1 shadow-sm"><Download size={14}/> 匯出 Excel (CSV)</button>
                         <label className="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-50 flex items-center gap-1 shadow-sm cursor-pointer">
@@ -1067,10 +1077,9 @@ const FormMaintenance = ({ initialData, onSave, onCancel, onConvertToCapa, custo
     const handleEquipmentChange = (e) => { const eqName = e.target.value; const linkedCycle = findScheduleCycle(formData.customerName, formData.assetId, eqName); setFormData(prev => ({ ...prev, equipment: eqName, cycle: linkedCycle || prev.cycle })); };
     const handleAddPart = () => { if (formData.replacementPart && formData.replacementQty) { const newPart = { name: formData.replacementPart, model: formData.replacementModel, qty: formData.replacementQty, isWarranty: formData.isWarranty, isQuote: formData.isQuote }; setFormData(prev => ({ ...prev, replacedParts: [...prev.replacedParts, newPart], replacementPart: '', replacementModel: '', replacementQty: '', isWarranty: false, isQuote: false })); } };
     const handleRemovePart = (index) => { setFormData(prev => ({ ...prev, replacedParts: prev.replacedParts.filter((_, i) => i !== index) })); };
-    const handleSaveAndPreview = () => { onSave(formData, { stayOnPage: true, onSuccess: (savedData) => { setFormData(savedData); const { text, link } = formatMaintenanceMessage(savedData, baseUrl); openMessage('保養完成通知 (已儲存)', text, link); } }); };
     return (
         <form onSubmit={(e) => { e.preventDefault(); onSave(formData); }} className="max-w-4xl mx-auto space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Activity className="text-emerald-600" /> 保養單</h2><div className="flex flex-wrap items-center gap-2">{isExistingRecord && (<div className="flex gap-2 mr-2 border-r pr-2 border-slate-300"><button type="button" onClick={() => onConvertToCapa(formData)} className="bg-purple-50 text-purple-700 border border-purple-200 px-3 py-2 rounded-xl text-sm hover:bg-purple-100 flex items-center gap-1 transition" title="延伸開立矯正預防措施單 (CAPA)"><Target size={16} /> 轉開 CAPA</button></div>)}<button type="button" onClick={handleSaveAndPreview} className="bg-[#06C755] text-white px-3 py-2.5 rounded-xl text-sm hover:bg-[#05b34c] flex items-center gap-1 transition shadow-md font-medium"><MessageCircle size={16} /> 儲存並通知</button><button type="button" onClick={onCancel} className="bg-white border border-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-1 font-medium"><ArrowLeft size={16} /> 回總覽</button><button type="submit" className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm hover:shadow-lg shadow-md flex items-center gap-2 transition font-medium"><Save size={16} /> 儲存返回</button></div></div>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Activity className="text-emerald-600" /> 保養單</h2><div className="flex flex-wrap items-center gap-2">{isExistingRecord && (<div className="flex gap-2 mr-2 border-r pr-2 border-slate-300"><button type="button" onClick={() => onConvertToCapa(formData)} className="bg-purple-50 text-purple-700 border border-purple-200 px-3 py-2 rounded-xl text-sm hover:bg-purple-100 flex items-center gap-1 transition" title="延伸開立矯正預防措施單 (CAPA)"><Target size={16} /> 轉開 CAPA</button></div>)}<button type="button" onClick={onCancel} className="bg-white border border-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-1 font-medium"><ArrowLeft size={16} /> 回總覽</button><button type="submit" className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm hover:shadow-lg shadow-md flex items-center gap-2 transition font-medium"><Save size={16} /> 儲存返回</button></div></div>
             <div className="space-y-6">
                 <Card className="p-6 md:p-8"><SectionTitle title="基本資料" icon={User} className="mt-0" /><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className={formData.isMultiDay ? "md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6" : ""}><div><div className="flex justify-between items-center mb-2"><Label className="mb-0" required>日期 {formData.isMultiDay && '(開始)'}</Label><label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600 font-medium bg-slate-100 px-2 py-1 rounded-lg hover:bg-slate-200 transition"><input type="checkbox" name="isMultiDay" checked={formData.isMultiDay || false} onChange={handleChange} className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5" />跨日行程</label></div><Input name="date" type="date" value={formData.date} onChange={handleChange} required /></div>{formData.isMultiDay && (<div className="animate-in fade-in slide-in-from-left-2"><Label>完工日期 (結束)</Label><Input name="endDate" type="date" value={formData.endDate} onChange={handleChange} /></div>)}</div><div><Label>單號</Label><Input value={formData.id || "系統自動產生"} disabled className="bg-slate-100 text-slate-500 cursor-not-allowed" /></div><div><Label required>客戶名稱</Label><DatalistInput listId="customers-list" name="customerName" value={formData.customerName} onChange={handleCustomerChange} options={customers.map(c => c.name)} required placeholder="選擇或手動輸入..." /></div><div><Label>場域類型</Label><DatalistInput listId="locations-list" name="locationType" value={formData.locationType} onChange={handleChange} options={DEFAULT_LOCATION_TYPES} placeholder="選擇或手動輸入..." /></div><div><Label>站別</Label><DatalistInput listId="maint-station" name="station" value={formData.station} onChange={handleChange} options={stations} placeholder="選擇或手動輸入..." /></div>{availableAssets.length > 0 ? (<div><Label>選擇設備資產 ({availableAssets.length} 筆)</Label><select name="assetId" value={formData.assetId || ''} onChange={handleAssetChange} className="w-full rounded-xl border-slate-200 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2.5 transition bg-blue-50/30"><option value="">-- 請選擇具體設備 --</option>{availableAssets.map(asset => { const w = getWarrantyStatus(asset.warrantyDate); return <option key={asset.id} value={asset.id}>{asset.name} ({asset.brand} {asset.model}) - {w.text}</option>; })}<option value="manual">手動輸入 (不在資產清單中)</option></select></div>) : (<div><Label>設備名稱</Label><DatalistInput listId="maint-equip-1" name="equipment" value={formData.equipment} onChange={handleEquipmentChange} options={equipment} placeholder="選擇或手動輸入..." /></div>)}{(formData.assetId === 'manual' || (availableAssets.length > 0 && !formData.assetId)) && (<div className="animate-in fade-in slide-in-from-top-1"><Label>手動指定設備名稱</Label><DatalistInput listId="maint-equip-2" name="equipment" value={formData.equipment} onChange={handleEquipmentChange} options={equipment} placeholder="選擇或手動輸入..." /></div>)}<div><Label>保養週期</Label><Input name="cycle" value={formData.cycle} onChange={handleChange} placeholder="例如：半年、季保" /></div></div></Card>
                 <Card className="p-6 md:p-8"><SectionTitle title="檢查項目表 (Checklist)" icon={CheckSquare} className="mt-0" /><div className="border border-slate-200 rounded-xl overflow-hidden mb-6 shadow-sm"><div className="grid grid-cols-12 bg-slate-50 p-3 text-sm font-bold text-slate-700 border-b border-slate-200"><div className="col-span-8">檢查項目</div><div className="col-span-2 text-center">正常 (OK)</div><div className="col-span-2 text-center">異常 (NG)</div></div>{formData.checklist.map((item, index) => (<div key={index} className="grid grid-cols-12 p-3 border-b border-slate-100 last:border-0 hover:bg-slate-50 items-center transition"><div className="col-span-8 text-sm text-slate-700 font-medium">{item.name}</div><div className="col-span-2 flex justify-center"><input type="checkbox" checked={item.ok || false} onChange={() => handleChecklistChange(index, 'ok')} className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer" /></div><div className="col-span-2 flex justify-center"><input type="checkbox" checked={item.ng || false} onChange={() => handleChecklistChange(index, 'ng')} className="w-5 h-5 text-red-600 rounded focus:ring-red-500 cursor-pointer" /></div></div>))}{formData.checklist.length === 0 && <div className="p-4 text-center text-slate-400">無檢查項目 (請至設定添加)</div>}</div></Card>
@@ -1123,14 +1132,6 @@ const FormRepair = ({ initialData, onSave, onCancel, onConvertToCapa, customers,
     const handleRemovePart = (index) => { 
         setFormData(prev => ({ ...prev, replacedParts: prev.replacedParts.filter((_, i) => i !== index) })); 
     };
-    
-    const handleSaveAndPreview = () => { 
-        onSave(formData, { stayOnPage: true, onSuccess: (savedData) => { 
-            setFormData(savedData); 
-            const { text, link } = formatRepairMessage(savedData, baseUrl); 
-            openMessage('報修結案報告 (已儲存)', text, link); 
-        } }); 
-    };
 
     return (
         <form onSubmit={(e) => { e.preventDefault(); onSave(formData); }} className="max-w-4xl mx-auto space-y-6">
@@ -1144,9 +1145,6 @@ const FormRepair = ({ initialData, onSave, onCancel, onConvertToCapa, customers,
                             </button>
                         </div>
                     )}
-                    <button type="button" onClick={handleSaveAndPreview} className="bg-[#06C755] text-white px-3 py-2.5 rounded-xl text-sm hover:bg-[#05b34c] flex items-center gap-1 transition shadow-md font-medium">
-                        <MessageCircle size={16} /> 儲存並產生報告
-                    </button>
                     <button type="button" onClick={onCancel} className="bg-white border border-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-1 font-medium">
                         <ArrowLeft size={16} /> 回總覽
                     </button>
@@ -1341,14 +1339,6 @@ const FormConstruction = ({ initialData, onSave, onCancel, onConvertToCapa, cust
     const handleRemovePart = (index) => { 
         setFormData(prev => ({ ...prev, replacedParts: prev.replacedParts.filter((_, i) => i !== index) })); 
     };
-    
-    const handleSaveAndPreview = () => { 
-        onSave(formData, { stayOnPage: true, onSuccess: (savedData) => { 
-            setFormData(savedData); 
-            const { text, link } = formatConstructionMessage(savedData, baseUrl); 
-            openMessage('施工結案報告 (已儲存)', text, link); 
-        } }); 
-    };
 
     return (
         <form onSubmit={(e) => { e.preventDefault(); onSave(formData); }} className="max-w-4xl mx-auto space-y-6">
@@ -1362,9 +1352,6 @@ const FormConstruction = ({ initialData, onSave, onCancel, onConvertToCapa, cust
                             </button>
                         </div>
                     )}
-                    <button type="button" onClick={handleSaveAndPreview} className="bg-[#06C755] text-white px-3 py-2.5 rounded-xl text-sm hover:bg-[#05b34c] flex items-center gap-1 transition shadow-md font-medium">
-                        <MessageCircle size={16} /> 儲存並產生報告
-                    </button>
                     <button type="button" onClick={onCancel} className="bg-white border border-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-1 font-medium">
                         <ArrowLeft size={16} /> 回總覽
                     </button>
@@ -1519,11 +1506,10 @@ const FormCapa = ({ initialData, onSave, onCancel, customers, stations, equipmen
     const handleCustomerChange = (e) => { const selectedName = e.target.value; const customer = customers.find(c => c.name === selectedName); setFormData(prev => ({ ...prev, customerName: selectedName, customerAddress: customer ? customer.address : '', locationType: customer?.type || prev.locationType, equipment: '', spec: '', assetId: '' })); };
     const handleAssetChange = (e) => { const assetId = e.target.value; const selectedAsset = assetList.find(a => a.id === assetId); if (selectedAsset) { setFormData(prev => ({ ...prev, assetId: assetId, equipment: selectedAsset.name, spec: `${selectedAsset.brand || ''} ${selectedAsset.model || ''}`.trim() || prev.spec })); } else { setFormData(prev => ({ ...prev, assetId: '', equipment: '' })); } };
     const handleChange = (e) => { const { name, value, type, checked } = e.target; setFormData(prev => { const newData = { ...prev, [name]: type === 'checkbox' ? checked : value }; if (name === 'testOk' && checked) { newData.revisitNeeded = false; } return newData; }); };
-    const handleSaveAndPreview = () => { onSave(formData, { stayOnPage: true, onSuccess: (savedData) => { setFormData(savedData); const { text, link } = formatCapaMessage(savedData, baseUrl); openMessage('矯正預防報告 (已儲存)', text, link); } }); };
     
     return (
         <form onSubmit={(e) => { e.preventDefault(); onSave(formData); }} className="max-w-4xl mx-auto space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Target className="text-purple-600" /> 矯正預防措施單 (CAPA)</h2><div className="flex gap-2"><button type="button" onClick={handleSaveAndPreview} className="bg-[#06C755] text-white px-3 py-2.5 rounded-xl text-sm hover:bg-[#05b34c] flex items-center gap-1 transition shadow-md font-medium"><MessageCircle size={16} /> 儲存並產生報告</button><button type="button" onClick={onCancel} className="bg-white border border-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-1 font-medium"><ArrowLeft size={16} /> 回總覽</button><button type="submit" className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm hover:shadow-lg shadow-md flex items-center gap-2 transition font-medium"><Save size={16} /> 儲存返回</button></div></div>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Target className="text-purple-600" /> 矯正預防措施單 (CAPA)</h2><div className="flex gap-2"><button type="button" onClick={onCancel} className="bg-white border border-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-1 font-medium"><ArrowLeft size={16} /> 回總覽</button><button type="submit" className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm hover:shadow-lg shadow-md flex items-center gap-2 transition font-medium"><Save size={16} /> 儲存返回</button></div></div>
             <div className="space-y-6">
                 <Card className="p-6 md:p-8"><SectionTitle title="基本資料" icon={User} className="mt-0" /><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div className={formData.isMultiDay ? "md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6" : ""}><div><div className="flex justify-between items-center mb-2"><Label className="mb-0" required>開立日期 {formData.isMultiDay && '(開始)'}</Label><label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-600 font-medium bg-slate-100 px-2 py-1 rounded-lg hover:bg-slate-200 transition"><input type="checkbox" name="isMultiDay" checked={formData.isMultiDay || false} onChange={handleChange} className="rounded text-purple-600 focus:ring-purple-500 w-3.5 h-3.5" />跨日行程</label></div><Input name="date" type="date" value={formData.date} onChange={handleChange} required /></div>{formData.isMultiDay && (<div className="animate-in fade-in slide-in-from-left-2"><Label>完成日期 (結束)</Label><Input name="endDate" type="date" value={formData.endDate} onChange={handleChange} /></div>)}</div><div><Label>單號 (自動生成)</Label><Input value={formData.id || "系統自動產生"} disabled className="bg-slate-100 text-slate-500 cursor-not-allowed" /></div>{formData.sourceOrderId && (<div className="md:col-span-2 bg-purple-50 p-3 rounded-xl border border-purple-100 text-purple-800 text-sm flex items-center gap-2"><LinkIcon size={16}/> 關聯原始工單：<strong>{formData.sourceOrderId}</strong></div>)}<div><Label required>客戶名稱</Label><DatalistInput listId="customers-list" name="customerName" value={formData.customerName} onChange={handleCustomerChange} options={customers.map(c => c.name)} required placeholder="選擇或手動輸入..." /></div><div><Label>場域類型</Label><DatalistInput listId="locations-list" name="locationType" value={formData.locationType} onChange={handleChange} options={DEFAULT_LOCATION_TYPES} placeholder="選擇或手動輸入..." /></div><div><Label>站別</Label><DatalistInput listId="capa-station" name="station" value={formData.station} onChange={handleChange} options={stations} placeholder="選擇或手動輸入..." /></div>{availableAssets.length > 0 ? (<div><Label>選擇設備資產 ({availableAssets.length} 筆)</Label><select name="assetId" value={formData.assetId || ''} onChange={handleAssetChange} className="w-full rounded-xl border-slate-200 shadow-sm focus:border-purple-500 focus:ring-purple-500 sm:text-sm border p-2.5 transition bg-purple-50/30"><option value="">-- 請選擇具體設備 --</option>{availableAssets.map(asset => { return <option key={asset.id} value={asset.id}>{asset.name} ({asset.brand} {asset.model})</option>; })}<option value="manual">手動輸入 (不在資產清單中)</option></select></div>) : (<div><Label>設備名稱</Label><DatalistInput listId="capa-equip-1" name="equipment" value={formData.equipment} onChange={handleChange} options={equipment} placeholder="選擇或手動輸入..." /></div>)}{(formData.assetId === 'manual' || (availableAssets.length > 0 && !formData.assetId)) && (<div className="animate-in fade-in slide-in-from-top-1"><Label>手動指定設備名稱</Label><DatalistInput listId="capa-equip-2" name="equipment" value={formData.equipment} onChange={handleChange} options={equipment} placeholder="選擇或手動輸入..." /></div>)}<div><Label>設備規格</Label><DatalistInput listId="capa-spec" name="spec" value={formData.spec} onChange={handleChange} options={specs} placeholder="選擇或手動輸入..." /></div></div></Card>
                 <Card className="p-6 md:p-8"><SectionTitle title="異常狀況與原因分析" icon={AlertTriangle} className="mt-0" /><div className="space-y-4"><div><Label>異常狀況描述 (Problem)</Label><textarea name="problemDescription" rows="3" className="w-full rounded-xl border-slate-200 shadow-sm focus:border-purple-500 focus:ring-purple-500 sm:text-sm border p-3 transition bg-slate-50" value={formData.problemDescription} onChange={handleChange} placeholder="請描述發生了什麼問題..."></textarea></div><div><Label>根本原因分析 (Root Cause Analysis)</Label><textarea name="rootCauseAnalysis" rows="4" className="w-full rounded-xl border-slate-200 shadow-sm focus:border-purple-500 focus:ring-purple-500 sm:text-sm border p-3 transition" value={formData.rootCauseAnalysis} onChange={handleChange} placeholder="分析造成此異常的根本原因為何..."></textarea></div></div></Card>
@@ -1818,18 +1804,27 @@ const OrderTable = ({ orders, onView, onDelete, allowDelete }) => (
                 : null;
             
             return (
-            <div key={String(order.id)} className="bg-white p-5 rounded-3xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-slate-100 transition-all duration-300 active:scale-[0.98] hover:shadow-md relative"><div onClick={() => onView(order)}><div className="flex justify-between items-start mb-3"><div className="flex gap-2 items-center"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.type === 'dispatch' ? 'bg-blue-100 text-blue-700' : order.type === 'maintenance' ? 'bg-emerald-100 text-emerald-700' : order.type === 'construction' ? 'bg-indigo-100 text-indigo-700' : order.type === 'capa' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>{order.type === 'dispatch' ? '派工' : order.type === 'maintenance' ? '保養' : order.type === 'construction' ? '施工' : order.type === 'capa' ? 'CAPA' : '報修'}</span><span className="text-xs text-slate-400 font-mono tracking-wider">#{String(order.id || '').slice(-4)}</span></div>{getOrderStatusBadge(order)}</div>
-            
-            <div className="font-extrabold text-slate-800 text-lg mb-1.5 flex items-center gap-2">
-                {String(order.customerName || '未指定客戶')}
-                {constructionAlert && (constructionAlert.type === 'today' || constructionAlert.type === 'urgent' || constructionAlert.type === 'overdue') && (
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded border ${constructionAlert.color} shrink-0`}>
-                        {constructionAlert.label}
-                    </span>
-                )}
-            </div>
-            
-            <div className="text-sm text-slate-500 mb-4 flex items-center gap-2"><Wrench size={14} className="text-slate-400" />{String(order.equipment || '未指定設備')}</div><div className="flex justify-between items-center text-xs text-slate-500 pt-3 border-t border-slate-100/80"><div className="flex items-center gap-1.5"><CalendarIcon size={14} className="text-blue-500/70" /> {String(order.date || '')}{order.isMultiDay && typeof order.endDate === 'string' && ` ~ ${order.endDate.slice(5)}`}</div><div className="flex items-center gap-1.5"><User size={14} className="text-blue-500/70" /> {String(order.serviceEngineer || '未指派')}</div></div></div></div>)
+            <div key={String(order.id)} className="bg-white p-5 rounded-3xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-slate-100 transition-all duration-300 hover:shadow-md relative">
+                <div>
+                    <div className="flex justify-between items-start mb-3"><div className="flex gap-2 items-center"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.type === 'dispatch' ? 'bg-blue-100 text-blue-700' : order.type === 'maintenance' ? 'bg-emerald-100 text-emerald-700' : order.type === 'construction' ? 'bg-indigo-100 text-indigo-700' : order.type === 'capa' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>{order.type === 'dispatch' ? '派工' : order.type === 'maintenance' ? '保養' : order.type === 'construction' ? '施工' : order.type === 'capa' ? 'CAPA' : '報修'}</span><span className="text-xs text-slate-400 font-mono tracking-wider">#{String(order.id || '').slice(-4)}</span></div>{getOrderStatusBadge(order)}</div>
+                
+                    <div className="font-extrabold text-slate-800 text-lg mb-1.5 flex items-center gap-2">
+                        {String(order.customerName || '未指定客戶')}
+                        {constructionAlert && (constructionAlert.type === 'today' || constructionAlert.type === 'urgent' || constructionAlert.type === 'overdue') && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded border ${constructionAlert.color} shrink-0`}>
+                                {constructionAlert.label}
+                            </span>
+                        )}
+                    </div>
+                
+                    <div className="text-sm text-slate-500 mb-4 flex items-center gap-2"><Wrench size={14} className="text-slate-400" />{String(order.equipment || '未指定設備')}</div><div className="flex justify-between items-center text-xs text-slate-500 pt-3 border-t border-slate-100/80"><div className="flex items-center gap-1.5"><CalendarIcon size={14} className="text-blue-500/70" /> {String(order.date || '')}{order.isMultiDay && typeof order.endDate === 'string' && ` ~ ${order.endDate.slice(5)}`}</div><div className="flex items-center gap-1.5"><User size={14} className="text-blue-500/70" /> {String(order.serviceEngineer || '未指派')}</div></div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+                    <button onClick={() => onView(order)} className="w-full bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold py-2.5 rounded-xl transition shadow-sm flex items-center justify-center gap-2">
+                        <ExternalLink size={16} /> 查看工單
+                    </button>
+                </div>
+            </div>)
         })}</div>
         <div className="hidden md:block overflow-x-auto"><table className="w-full text-sm text-left"><thead className="text-slate-500 bg-slate-50/80 border-b border-slate-200/80 uppercase tracking-wider text-[11px] font-bold"><tr><th className="px-6 py-5">單號</th><th className="px-6 py-5">類型</th><th className="px-6 py-5">狀態</th><th className="px-6 py-5">日期</th><th className="px-6 py-5 hidden lg:table-cell">最後更新</th><th className="px-6 py-5">客戶名稱</th><th className="px-6 py-5 hidden lg:table-cell">場域</th><th className="px-6 py-5 hidden xl:table-cell">工程師</th><th className="px-6 py-5 text-right">操作</th></tr></thead><tbody className="divide-y divide-slate-100/80">{orders.length === 0 ? (<tr><td colSpan="9" className="text-center py-16 text-slate-400">目前沒有工單資料</td></tr>) : orders.map((order) => {
             const constructionAlert = (order.type === 'dispatch' && typeof order.constructionDate === 'string' && !['已完成', '已結案', '正常'].includes(order.status)) 
@@ -1837,7 +1832,7 @@ const OrderTable = ({ orders, onView, onDelete, allowDelete }) => (
                 : null;
 
             return (
-            <tr key={String(order.id)} className="hover:bg-blue-50/40 transition-colors group cursor-pointer" onClick={() => onView(order)}><td className="px-6 py-4 font-mono text-slate-500 text-xs tracking-wider">{String(order.id || '')}</td><td className="px-6 py-4"><span className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm ${order.type === 'dispatch' ? 'bg-blue-100 text-blue-700' : order.type === 'maintenance' ? 'bg-emerald-100 text-emerald-700' : order.type === 'construction' ? 'bg-indigo-100 text-indigo-700' : order.type === 'capa' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>{order.type === 'dispatch' ? '派工' : order.type === 'maintenance' ? '保養' : order.type === 'construction' ? '施工' : order.type === 'capa' ? 'CAPA' : '報修'}</span></td><td className="px-6 py-4">{getOrderStatusBadge(order)}</td>
+            <tr key={String(order.id)} className="hover:bg-blue-50/40 transition-colors group"><td className="px-6 py-4 font-mono text-slate-500 text-xs tracking-wider">{String(order.id || '')}</td><td className="px-6 py-4"><span className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm ${order.type === 'dispatch' ? 'bg-blue-100 text-blue-700' : order.type === 'maintenance' ? 'bg-emerald-100 text-emerald-700' : order.type === 'construction' ? 'bg-indigo-100 text-indigo-700' : order.type === 'capa' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>{order.type === 'dispatch' ? '派工' : order.type === 'maintenance' ? '保養' : order.type === 'construction' ? '施工' : order.type === 'capa' ? 'CAPA' : '報修'}</span></td><td className="px-6 py-4">{getOrderStatusBadge(order)}</td>
             <td className="px-6 py-4 font-medium text-slate-600">
                 <div>{String(order.date || '')}{order.isMultiDay && typeof order.endDate === 'string' && ` ~ ${order.endDate.slice(5)}`}</div>
                 {constructionAlert && (constructionAlert.type === 'today' || constructionAlert.type === 'urgent' || constructionAlert.type === 'overdue') && (
@@ -1846,7 +1841,7 @@ const OrderTable = ({ orders, onView, onDelete, allowDelete }) => (
                     </div>
                 )}
             </td>
-            <td className="px-6 py-4 text-xs text-slate-400 hidden lg:table-cell">{order.updatedAt ? new Date(order.updatedAt).toLocaleString() : '-'}</td><td className="px-6 py-4 font-bold text-slate-800">{String(order.customerName || '未指定客戶')}</td><td className="px-6 py-4 text-slate-500 hidden lg:table-cell">{String(order.locationType || '-')}</td><td className="px-6 py-4 hidden xl:table-cell text-slate-600">{formatEngineerTeam(order.serviceEngineer, order.assistants)}</td><td className="px-6 py-4 text-right space-x-2 whitespace-nowrap"><button onClick={(e) => { e.stopPropagation(); onView(order); }} className="text-blue-600 hover:text-blue-800 font-bold px-4 py-2 bg-blue-50 hover:bg-blue-100 rounded-xl transition shadow-sm">查看</button>{allowDelete && <button onClick={(e) => { e.stopPropagation(); onDelete(order.id); }} className="text-red-500 hover:text-red-700 p-2 bg-red-50 hover:bg-red-100 rounded-xl transition shadow-sm"><Trash2 size={18} /></button>}</td></tr>)
+            <td className="px-6 py-4 text-xs text-slate-400 hidden lg:table-cell">{order.updatedAt ? new Date(order.updatedAt).toLocaleString() : '-'}</td><td className="px-6 py-4 font-bold text-slate-800">{String(order.customerName || '未指定客戶')}</td><td className="px-6 py-4 text-slate-500 hidden lg:table-cell">{String(order.locationType || '-')}</td><td className="px-6 py-4 hidden xl:table-cell text-slate-600">{formatEngineerTeam(order.serviceEngineer, order.assistants)}</td><td className="px-6 py-4 text-right space-x-2 whitespace-nowrap"><button onClick={() => onView(order)} className="text-blue-600 hover:text-blue-800 font-bold px-4 py-2 bg-blue-50 hover:bg-blue-100 rounded-xl transition shadow-sm">查看</button>{allowDelete && <button onClick={() => onDelete(order.id)} className="text-red-500 hover:text-red-700 p-2 bg-red-50 hover:bg-red-100 rounded-xl transition shadow-sm"><Trash2 size={18} /></button>}</td></tr>)
         })}</tbody></table></div>
     </>
 );
@@ -2106,7 +2101,9 @@ const LoginScreen = ({ staffList, setStaffList, appPermissions, setCurrentIdenti
         try {
             app = initializeApp(newConfigToTest, `app-${Date.now()}`);
             auth = getAuth(app);
-            db = getFirestore(app);
+            db = initializeFirestore(app, {
+                localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+            });
         } catch(e) {
             console.error("Firebase test init error", e);
             alert("資料庫連線初始化失敗！請檢查設定參數（例如是否缺少 projectId）是否完整且正確。");
@@ -2394,6 +2391,7 @@ function MainApp({ onDbChange }) {
   const [scheduleModalObj, setScheduleModalObj] = useState({ isOpen: false, item: null, index: null, selectedDate: '', autoUpdate: true });
 
   const [envInfo, setEnvInfo] = useState({ mode: 'default', name: '' });
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const [currentIdentity, setCurrentIdentity] = useState(() => {
       try {
@@ -2407,17 +2405,15 @@ function MainApp({ onDbChange }) {
       return null;
   });
 
+  // --- 新增：確保工程師預設選到可用的單據 (防呆機制) ---
   useEffect(() => {
-      try {
-          if (typeof window !== 'undefined') {
-              const mode = localStorage.getItem('env_mode') || 'default';
-              const name = localStorage.getItem('custom_env_name') || '自訂環境';
-              setEnvInfo({ mode, name });
+      if (currentIdentity?.type === 'engineer') {
+          if (createType === '派工單' || createType === '矯正預防單') {
+              setCreateType('報修單'); // 現場工程師最常用的預設單據
           }
-      } catch(e){}
-  }, []);
+      }
+  }, [currentIdentity, createType]);
 
-  // 鎖定滑鼠右鍵 (進入系統後)，但允許在輸入框使用右鍵以便貼上
   useEffect(() => {
       if (!currentIdentity) return; // 確保只有登入後才鎖定
       const handleContextMenu = (e) => {
@@ -2433,6 +2429,18 @@ function MainApp({ onDbChange }) {
           document.removeEventListener('contextmenu', handleContextMenu);
       };
   }, [currentIdentity]);
+
+  // 監聽連線狀態
+  useEffect(() => {
+      const handleOnline = () => setIsOffline(false);
+      const handleOffline = () => setIsOffline(true);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+      };
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => { 
@@ -2738,10 +2746,8 @@ function MainApp({ onDbChange }) {
       return (
           <div className="fixed inset-0 bg-slate-900/40 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
               <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-white/20">
-                  <div className="flex items-center gap-3 mb-4">
-                      <div className="p-3 rounded-full bg-blue-50 text-blue-600">
-                          <CalendarClock size={24} />
-                      </div>
+                  <div className="flex items-center gap-2 mb-4">
+                      <CalendarClock size={28} className="text-blue-600" strokeWidth={2.5} />
                       <h3 className="text-lg font-bold text-slate-800">建立保養工單</h3>
                   </div>
                   <div className="mb-4 text-sm text-slate-600">
@@ -2868,7 +2874,8 @@ function MainApp({ onDbChange }) {
                     <div className="flex justify-between items-center">
                         <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-600 flex items-center gap-3 tracking-tight">
                             維運管理儀表板
-                            {loadingCust && <span className="text-xs font-normal text-slate-400 flex items-center gap-1.5"><div className="w-4 h-4 rounded-full border-[3px] border-slate-200 border-t-blue-500 animate-spin"></div> 同步中</span>}
+                            {loadingCust && !isOffline && <span className="text-xs font-normal text-slate-400 flex items-center gap-1.5"><div className="w-4 h-4 rounded-full border-[3px] border-slate-200 border-t-blue-500 animate-spin"></div> 同步中</span>}
+                            {isOffline && <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-1 rounded-lg flex items-center gap-1 border border-red-100 shadow-sm"><WifiOff size={14} /> 離線中</span>}
                         </h1>
                         <div className="flex items-center gap-4">
                             <div className="hidden md:flex items-center gap-2 bg-white p-1 pr-3 rounded-full border border-slate-200 shadow-sm text-sm">
@@ -2929,7 +2936,7 @@ function MainApp({ onDbChange }) {
                     {/* Construction Alerts Panel */}
                     {canShowSchedule && <ConstructionAlertPanel orders={dashboardOrders} onView={handleView} />}
 
-                    <Card className="p-8 border-0 shadow-[0_8px_30px_-4px_rgba(37,99,235,0.1)] bg-gradient-to-br from-white to-blue-50/50 relative overflow-hidden"><div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-gradient-to-br from-blue-200/30 to-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div><h3 className="font-extrabold text-xl text-slate-800 mb-6 flex items-center gap-3 relative z-10"><div className="p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg shadow-blue-500/30"><Plus size={22} strokeWidth={2.5}/></div> 建立新工單</h3><div className="flex flex-col md:flex-row items-end gap-5 relative z-10"><div className="flex-1 w-full"><Label>請選擇工單類型</Label><Select value={createType} onChange={(e) => setCreateType(e.target.value)} options={['派工單', '保養單', '報修單', '施工單', '矯正預防單']} className="bg-white/80 backdrop-blur-sm shadow-sm" /></div><div className="w-full md:w-auto"><button onClick={() => { setCurrentOrder(null); if (createType === '派工單') setActiveTab('create_dispatch'); if (createType === '保養單') setActiveTab('create_maintenance'); if (createType === '報修單') setActiveTab('create_repair'); if (createType === '施工單') setActiveTab('create_construction'); if (createType === '矯正預防單') setActiveTab('create_capa'); }} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3.5 rounded-2xl hover:shadow-[0_8px_20px_-4px_rgba(79,70,229,0.4)] hover:-translate-y-0.5 active:scale-[0.98] shadow-md flex items-center justify-center gap-2 transition-all duration-200 font-bold text-base h-[52px]"><Plus size={20} strokeWidth={2.5} /> 立即建立</button></div></div><div className="mt-6 pt-5 border-t border-slate-200/50 relative z-10">{createType === '派工單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg shrink-0"><ClipboardList size={18}/></div> <span className="pt-1"><strong>派工單 (Dispatch)：</strong>適用於一般任務指派、初始問題通報，或尚未確定具體維修內容的工作分發。</span></div>}{createType === '保養單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg shrink-0"><Activity size={18}/></div> <span className="pt-1"><strong>保養單 (Maintenance)：</strong>適用於例行性巡檢、設備定期保養、電壓電流數值量測與紀錄。</span></div>}{createType === '報修單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg shrink-0"><Hammer size={18}/></div> <span className="pt-1"><strong>報修單 (Repair)：</strong>適用於設備故障排除、突發性維修、零件更換與測試紀錄。</span></div>}{createType === '施工單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg shrink-0"><PlayCircle size={18}/></div> <span className="pt-1"><strong>施工單 (Construction)：</strong>適用於專案工程施作、設備安裝汰換、大型整修工程。</span></div>}{createType === '矯正預防單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg shrink-0"><Target size={18}/></div> <span className="pt-1"><strong>矯正與預防單 (CAPA)：</strong>適用於嚴重異常發生後，進行根本原因分析、擬定矯正與預防措施的專屬紀錄。</span></div>}</div></Card>
+                    <Card className="p-8 border-0 shadow-[0_8px_30px_-4px_rgba(37,99,235,0.1)] bg-gradient-to-br from-white to-blue-50/50 relative overflow-hidden"><div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-gradient-to-br from-blue-200/30 to-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div><h3 className="font-extrabold text-xl text-slate-800 mb-6 flex items-center gap-2 relative z-10"><Plus size={28} className="text-blue-600" strokeWidth={3} /> 建立新工單</h3><div className="flex flex-col md:flex-row items-end gap-5 relative z-10"><div className="flex-1 w-full"><Label>請選擇工單類型</Label><Select value={createType} onChange={(e) => setCreateType(e.target.value)} options={currentIdentity?.type === 'admin' ? ['派工單', '保養單', '報修單', '施工單', '矯正預防單'] : ['報修單', '保養單', '施工單']} className="bg-white/80 backdrop-blur-sm shadow-sm" /></div><div className="w-full md:w-auto"><button onClick={() => { setCurrentOrder(null); if (createType === '派工單') setActiveTab('create_dispatch'); if (createType === '保養單') setActiveTab('create_maintenance'); if (createType === '報修單') setActiveTab('create_repair'); if (createType === '施工單') setActiveTab('create_construction'); if (createType === '矯正預防單') setActiveTab('create_capa'); }} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3.5 rounded-2xl hover:shadow-[0_8px_20px_-4px_rgba(79,70,229,0.4)] hover:-translate-y-0.5 active:scale-[0.98] shadow-md flex items-center justify-center gap-2 transition-all duration-200 font-bold text-base h-[52px]"><Plus size={20} strokeWidth={2.5} /> 立即建立</button></div></div><div className="mt-6 pt-5 border-t border-slate-200/50 relative z-10">{createType === '派工單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg shrink-0"><ClipboardList size={18}/></div> <span className="pt-1"><strong>派工單 (Dispatch)：</strong>適用於一般任務指派、初始問題通報，或尚未確定具體維修內容的工作分發。</span></div>}{createType === '保養單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg shrink-0"><Activity size={18}/></div> <span className="pt-1"><strong>保養單 (Maintenance)：</strong>適用於例行性巡檢、設備定期保養、電壓電流數值量測與紀錄。</span></div>}{createType === '報修單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg shrink-0"><Hammer size={18}/></div> <span className="pt-1"><strong>報修單 (Repair)：</strong>適用於設備故障排除、突發性維修、零件更換與測試紀錄。</span></div>}{createType === '施工單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-lg shrink-0"><PlayCircle size={18}/></div> <span className="pt-1"><strong>施工單 (Construction)：</strong>適用於專案工程施作、設備安裝汰換、大型整修工程。</span></div>}{createType === '矯正預防單' && <div className="text-sm text-slate-600 flex items-start gap-3 animate-in fade-in duration-300"><div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg shrink-0"><Target size={18}/></div> <span className="pt-1"><strong>矯正與預防單 (CAPA)：</strong>適用於嚴重異常發生後，進行根本原因分析、擬定矯正與預防措施的專屬紀錄。</span></div>}</div></Card>
                     <Card className="p-0 overflow-hidden shadow-lg shadow-slate-200/40 border-0">
                         <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center bg-white gap-4"><div className="flex items-center gap-4 w-full md:w-auto"><h2 className="font-bold text-slate-700 whitespace-nowrap">工單列表</h2><div className="flex items-center gap-2 w-full md:w-auto"><div className="relative flex-1 md:w-40"><Filter className="absolute left-3 top-3 text-slate-400" size={14} /><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full pl-9 pr-4 py-2.5 border-slate-200 border rounded-xl text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-200 outline-none appearance-none transition"><option value="">所有狀態</option>{STATUS_OPTIONS.map(status => (<option key={status} value={status}>{status}</option>))}</select></div>{(statusFilter || searchTerm) && (<button onClick={() => { setStatusFilter(''); setSearchTerm(''); }} className="text-slate-400 hover:text-red-500 p-2 bg-slate-50 rounded-full hover:bg-red-50 transition" title="清除所有篩選"><X size={16} /></button>)}</div></div><div className="flex items-center gap-3 w-full md:w-auto justify-end"><div className="relative w-full md:w-auto"><Search className="absolute left-3 top-2.5 text-slate-400" size={16} /><input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="搜尋單號、客戶..." className="pl-9 pr-4 py-2 border border-slate-200 rounded-full text-sm w-full md:w-56 focus:ring-2 focus:ring-blue-200 outline-none transition" /></div><div className="flex bg-slate-100 rounded-xl p-1 shrink-0"><button onClick={() => setDashboardViewMode('split')} className={`p-1.5 rounded-lg transition flex items-center gap-1 text-xs font-medium ${dashboardViewMode === 'split' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} title="綜覽模式"><Layout size={16} /></button><button onClick={() => setDashboardViewMode('list')} className={`p-1.5 rounded-lg transition flex items-center gap-1 text-xs font-medium ${dashboardViewMode === 'list' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} title="列表檢視"><List size={16} /></button><button onClick={() => setDashboardViewMode('calendar')} className={`p-1.5 rounded-lg transition flex items-center gap-1 text-xs font-medium ${dashboardViewMode === 'calendar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} title="行事曆檢視"><CalendarIcon size={16} /></button></div></div></div>
                         {dashboardViewMode === 'split' && (<div className="p-4 bg-slate-50/50"><WeeklyScheduler orders={dashboardOrders} onView={handleView} /><div className="mt-4 border-t border-slate-200 pt-6"><div className="flex justify-between items-center mb-4 px-1"><h4 className="font-bold text-slate-700 flex items-center gap-2"><List size={18} className="text-slate-500"/> 最近更新紀錄</h4><span className="text-xs bg-white border border-slate-200 text-slate-500 px-3 py-1 rounded-full shadow-sm">顯示 {Math.min(10, dashboardOrders.length)} / {dashboardOrders.length} 筆</span></div><OrderTable orders={dashboardOrders.slice(0, 10)} onView={handleView} onDelete={handleDelete} allowDelete={currentIdentity?.type === 'admin' && appPermissions?.allowDelete} />{dashboardOrders.length > 10 && <div className="text-center mt-4"><button onClick={() => setDashboardViewMode('list')} className="text-sm font-medium text-blue-600 hover:text-blue-800 px-4 py-2 hover:bg-blue-50 rounded-lg transition">查看更多...</button></div>}</div></div>)}
@@ -2947,7 +2954,16 @@ function MainApp({ onDbChange }) {
         <MessageModal />
         {/* 修正 3：將 <ScheduleDispatchModal /> 改為函數呼叫，避免 React 背景更新時造成彈出視窗失焦 */}
         {ScheduleDispatchModal()}
-        <div className="min-h-screen bg-slate-50/50 p-4 pb-32 md:p-8 font-sans text-slate-700 selection:bg-blue-100 selection:text-blue-900">
+
+        {/* 離線提示橫幅 */}
+        {isOffline && (
+            <div className="fixed top-0 left-0 right-0 z-[10000] bg-red-500 text-white text-xs md:text-sm py-2 px-4 text-center flex items-center justify-center gap-2 font-bold shadow-md animate-in slide-in-from-top-full duration-300">
+                <WifiOff size={16} className="animate-pulse" /> 
+                系統目前處於離線狀態 (資料將自動暫存，網路恢復後自動同步上傳)
+            </div>
+        )}
+
+        <div className={`min-h-screen bg-slate-50/50 p-4 pb-32 md:p-8 font-sans text-slate-700 selection:bg-blue-100 selection:text-blue-900 ${isOffline ? 'pt-12 md:pt-16' : ''}`}>
             {renderContent()}
         </div>
         <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} onCreateClick={handleFabCreate} badgeCount={dueSchedulesCount} currentIdentity={currentIdentity} appPermissions={appPermissions} />
