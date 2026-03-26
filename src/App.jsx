@@ -1743,12 +1743,26 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (orders.length > 0 && !hasHandledDeepLink.current && typeof window !== 'undefined') {
+    if (currentIdentity && orders.length > 0 && !hasHandledDeepLink.current && typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         const id = params.get('id');
-        if (id) { const targetOrder = orders.find(o => o.id === id); if (targetOrder) { handleView(targetOrder); hasHandledDeepLink.current = true; } }
+        if (id) { 
+            const targetOrder = orders.find(o => o.id === id); 
+            if (targetOrder) { 
+                confirm({
+                    title: "開啟指定工單",
+                    message: `偵測到您點擊了通知連結。\n單號：${targetOrder.id}\n客戶：${targetOrder.customerName}\n設備：${targetOrder.equipment || '未指定'}\n\n是否立即開啟此工單？`,
+                    onConfirm: () => handleView(targetOrder),
+                    isDanger: false
+                });
+            } 
+            hasHandledDeepLink.current = true; 
+            // 清除網址列參數，避免重新整理後再次觸發
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
     }
-  }, [orders]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, currentIdentity]);
 
   // 新增：登入後鎖定滑鼠右鍵，但允許輸入框
   useEffect(() => {
