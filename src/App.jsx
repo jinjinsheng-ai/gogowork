@@ -85,12 +85,20 @@ import {
   CopyPlus
 } from 'lucide-react';
 
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = {
+  apiKey: "AIzaSyDbeqaL0ury1sPjubVjYk9yPS2IXBvjxvg",
+  authDomain: "gogo-work.firebaseapp.com",
+  projectId: "gogo-work",
+  storageBucket: "gogo-work.firebasestorage.app",
+  messagingSenderId: "75393634589",
+  appId: "1:75393634589:web:f937c2a3d83532751d91f4"
+};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
+// 幫這個專案取一個固定的資料夾名稱
+const appId = 'gogowork';
 // --- Helper Functions ---
 const parseCSV = (str) => {
     const result = []; let row = []; let inQuotes = false; let val = '';
